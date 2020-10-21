@@ -1,0 +1,227 @@
+
+#Libraries
+
+
+#Image pre-processing and necessary libraries
+import tensorflow as tf
+import random
+from tensorflow import keras    
+from keras.callbacks import History 
+# Helper libraries
+import numpy as np
+import matplotlib.pyplot as plt
+-----------------------------------------------------------------
+#Global variables
+
+#Learning rate of PGDA
+hyp_learn = 0.1
+
+#Initial probability 
+prob=0.1
+
+#Probability history
+prob_lst = [prob]
+
+#Number of epoch
+hyp_epoch = 1
+
+#Loss history lists
+loss_hist_lst = []
+avg_loss_lst = []
+
+
+---------------------------------------------------------------------------------------------------------------
+
+################Prob. Gradient Descent Algorithm#############################
+
+def Prob_GDA(index, prob,Train_error_c, Train_error_p, prob_p=0.001):
+    if index == 1: #PGDA for first epoch and iteration
+        prob = prob - (hyp_learn*(Train_error_c-Train_error_p))
+    else:          #PDGA for remaining epoch and iteration
+        prob = prob - (hyp_learn*(Train_error_c-Train_error_p))#/(prob-prob_lst[-2]))
+    
+    return prob
+
+---------------------------------------------------------------------------------------------------------------
+
+
+################Function to reconfigure the keras model##########################
+
+def reconfig_model(index,zero_layer_weight,third_layer_weight,seventh_layer_weight,
+                       eighth_layer_weight,Train_error_c, Train_error_p, model, prob, prob_lst):
+    
+    #Checking for probability in [0,1]
+    if (1-prob) >= 1 or (1-prob) <0:
+        pass
+    else:
+        if index == 1: #For first iteration
+            prob=Prob_GDA(index,prob,Train_error_c,Train_error_p)
+        else: #For remaining iteration
+            prob=Prob_GDA(index,prob, Train_error_c,Train_error_p, prob_lst[-1])
+
+    #Check probability in [0,1]
+    if (1-prob)>=1:
+        prob=0.1 #Or one can opt to terminate the algorithm
+    if (1-prob)<0:
+        prob = 0.9
+    prob_lst.append(prob)
+    if index == 1: # first iteration
+            model = keras.Sequential([
+                keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1),input_shape=(28,28,1), padding='same',
+                                    activation='relu'),
+                keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+                keras.layers.MaxPooling2D((2,2), strides=2),
+                keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1), padding='same',
+                                    activation='relu'),
+                keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+                keras.layers.MaxPooling2D((2,2), strides=2),
+                keras.layers.Flatten(),
+                keras.layers.Dense(128, activation='relu'),
+                keras.layers.Dense(10, activation='softmax')
+                ])
+    else:         #Remaining iteration
+        model = keras.Sequential([
+            keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1),input_shape=(28,28,1), padding='same',
+                                activation='relu'),
+            keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+            keras.layers.MaxPooling2D((2,2), strides=2),
+            keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1), padding='same',
+                                activation='relu'),
+            keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+            keras.layers.MaxPooling2D(pool_size=(2,2), strides=2),
+            keras.layers.Flatten(),
+            keras.layers.Dense(128, activation='relu'),
+            keras.layers.Dense(10, activation='softmax')
+            ])
+        
+    #Copy the weights
+    if index == 1: #first iteration and first epoch
+        pass
+    else:          #For remaining iteration
+        model.layers[0].set_weights(zero_layer_weight)
+        model.layers[3].set_weights(third_layer_weight)
+        model.layers[7].set_weights(seventh_layer_weight)
+        model.layers[8].set_weights(eighth_layer_weight)
+        
+#Model Compilation
+    model.compile(optimizer='adam',
+              loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+              metrics=['accuracy'])
+    return model, prob, prob_lst
+    
+-----------------------------------------------------------------------------------------------------------------
+
+###########################Data pre-processing################################
+
+fashion_mnist = keras.datasets.fashion_mnist
+(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
+
+class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+               'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+
+#Image pre-processing
+train_images = train_images / 255
+test_images = test_images / 255
+
+train_images = train_images.reshape((train_images.shape[0], 28, 28, 1))
+test_images = test_images.reshape((test_images.shape[0], 28, 28, 1))
+
+
+-----------------------------------------------------------------------------------------------------------------
+###############################Class to track loss history per epoch##########################
+
+class LossHistory(keras.callbacks.Callback):
+     def on_epoch_end(self, epoch, logs=None):
+        avg_loss_lst.append(logs["loss"])
+-----------------------------------------------------------------------------------------------------------------
+
+#############################Main code####################################
+
+#Main code
+
+hyp_epoch = 1
+
+loss_hist_lst = []
+
+avg_loss_lst = []
+
+class LossHistory(keras.callbacks.Callback):
+     def on_epoch_end(self, epoch, logs=None):
+        avg_loss_lst.append(logs["loss"])
+
+#Initial model
+model = keras.Sequential([
+                keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1),
+                                    input_shape=(28,28,1),
+                                    padding='same',activation='relu'),
+                keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+                keras.layers.MaxPooling2D((2,2), strides=2),
+                keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1), padding='same',
+                                    activation='relu'),
+                keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+                keras.layers.MaxPooling2D((2,2), strides=2),
+                keras.layers.Flatten(),
+                keras.layers.Dense(128, activation='relu'),
+                keras.layers.Dense(10, activation='softmax')
+                ])
+#Initial model compilation
+model.compile(optimizer='adam',
+          loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+          metrics=['accuracy'])
+
+#Model fitting and weight modification
+for i in range(1,11):
+
+    #Model fitting
+    if i == 1:  #For first iteration
+        print(1-prob)
+        hist_first_iteration = model.fit(train_images, train_labels, epochs= 2, 
+                                         callbacks=LossHistory())
+        
+        before_iteration_loss = hist_first_iteration.history['loss'][0]
+        after_iteration_loss = hist_first_iteration.history['loss'][1]
+        loss_hist_lst.extend([hist_first_iteration.history['loss'][0],
+                             hist_first_iteration.history['loss'][1]])
+
+    else: #For remaining iteration
+        #print(model.get_config())
+        print(1-prob)
+        hist_remaining_iteration = model.fit(train_images, train_labels, epochs= hyp_epoch, 
+                                             callbacks=LossHistory())
+        
+        loss_hist_lst.append(hist_remaining_iteration.history['loss'][0])
+
+    #Accuracy evaluations
+    test_loss, test_acc = model.evaluate(test_images,  test_labels, verbose=2)
+
+    #Save the layer weights
+    zero_layer_weights = model.layers[0].get_weights()
+    third_layer_weights =  model.layers[3].get_weights()
+    seventh_layer_weights = model.layers[7].get_weights()
+    eighth_layer_weights = model.layers[8].get_weights()
+    
+    
+
+    #Model reconfiguration
+    if i == 1: #For first iteration
+        model, prob, prob_lst = reconfig_model(i,zero_layer_weights,third_layer_weights, 
+                                               seventh_layer_weights,
+                                               eighth_layer_weights,
+                                               after_iteration_loss, 
+                                               before_iteration_loss,
+                                               model, prob, prob_lst)
+    else:  #For remaining iteration
+        model, prob, prob_lst = reconfig_model(i,zero_layer_weights,third_layer_weights, 
+                                               seventh_layer_weights,
+                                               eighth_layer_weights,
+                                               avg_loss_lst[-1], 
+                                               avg_loss_lst[-2],
+                                               model, prob, prob_lst)
+       
+
+print('\nTest accuracy:', test_acc)
+
+
+
+
+
