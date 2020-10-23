@@ -1,7 +1,7 @@
-
 #Libraries
 
-
+import math
+from numpy import log as ln
 #Image pre-processing and necessary libraries
 import tensorflow as tf
 import random
@@ -10,70 +10,74 @@ from keras.callbacks import History
 # Helper libraries
 import numpy as np
 import matplotlib.pyplot as plt
------------------------------------------------------------------
-#Global variables
+
+#####################Global variables ###############################3
+
 
 #Learning rate of PGDA
-hyp_learn = 0.1
+hyp_learn = 10
 
-#Initial probability 
-prob=0.1
+#prob of retention
+actual_prob =   0.01
 
-#Probability history
-prob_lst = [prob]
+prob = inverse_bijection(actual_prob)  #Bijection for (0,1) to R
 
-#Number of epoch
+#Number of epochs
 hyp_epoch = 1
 
-#Loss history lists
 loss_hist_lst = []
+
 avg_loss_lst = []
 
+#Probability history
+prob_lst = [bijection(prob)]
 
----------------------------------------------------------------------------------------------------------------
+#####################Defining bijective function rom R to (0,1)#############################
 
-################Prob. Gradient Descent Algorithm#############################
+def bijection(real_val):
+    if real_val == 1:
+        real_val = 0.99
+    prop_prob = 1/(1+math.exp(-real_val))
+    return prop_prob
 
+###########################Defining inverse bijection function from (0,1) to R#################
+def inverse_bijection(p):
+    return(-(ln(1/p)-1))
+
+########################## Prob. Gradient Descent Algorithm ###############################
 def Prob_GDA(index, prob,Train_error_c, Train_error_p, prob_p=0.001):
     if index == 1: #PGDA for first epoch and iteration
         prob = prob - (hyp_learn*(Train_error_c-Train_error_p))
     else:          #PDGA for remaining epoch and iteration
-        prob = prob - (hyp_learn*(Train_error_c-Train_error_p))#/(prob-prob_lst[-2]))
+        prob = prob - (hyp_learn*((Train_error_c-Train_error_p))/(prob-prob_lst[-2]))
     
+    #This is to normalize the real number to [0,1) range
+    #prob = bijection(prob)
     return prob
+    
+################################### Function to reconfigure the keras model #####################3
 
----------------------------------------------------------------------------------------------------------------
-
-
-################Function to reconfigure the keras model##########################
 
 def reconfig_model(index,zero_layer_weight,third_layer_weight,seventh_layer_weight,
                        eighth_layer_weight,Train_error_c, Train_error_p, model, prob, prob_lst):
     
-    #Checking for probability in [0,1]
-    if (1-prob) >= 1 or (1-prob) <0:
-        pass
-    else:
-        if index == 1: #For first iteration
-            prob=Prob_GDA(index,prob,Train_error_c,Train_error_p)
-        else: #For remaining iteration
-            prob=Prob_GDA(index,prob, Train_error_c,Train_error_p, prob_lst[-1])
+    if index == 1: #For first iteration
+        prob=Prob_GDA(index,prob,Train_error_c,Train_error_p)
+    else: #For remaining iteration
+        prob=Prob_GDA(index,prob, Train_error_c,Train_error_p, prob_lst[-1])
 
-    #Check probability in [0,1]
-    if (1-prob)>=1:
-        prob=0.1 #Or one can opt to terminate the algorithm
-    if (1-prob)<0:
-        prob = 0.9
+    if (1-bijection(prob))<0.00001:
+        prob = inverse_bijection(0.99)
     prob_lst.append(prob)
     if index == 1: # first iteration
             model = keras.Sequential([
                 keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1),input_shape=(28,28,1), padding='same',
                                     activation='relu'),
-                keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+                keras.layers.Dropout(rate=(1-bijection(prob))), #Dropout layer
                 keras.layers.MaxPooling2D((2,2), strides=2),
                 keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1), padding='same',
                                     activation='relu'),
-                keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+                keras.layers.Dropout(rate=(1-bijection(prob))), #Dropout layer
                 keras.layers.MaxPooling2D((2,2), strides=2),
                 keras.layers.Flatten(),
                 keras.layers.Dense(128, activation='relu'),
@@ -83,11 +87,11 @@ def reconfig_model(index,zero_layer_weight,third_layer_weight,seventh_layer_weig
         model = keras.Sequential([
             keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1),input_shape=(28,28,1), padding='same',
                                 activation='relu'),
-            keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+            keras.layers.Dropout(rate=(1-bijection(prob))), #Dropout layer
             keras.layers.MaxPooling2D((2,2), strides=2),
             keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1), padding='same',
                                 activation='relu'),
-            keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+            keras.layers.Dropout(rate=(1-bijection(prob))), #Dropout layer
             keras.layers.MaxPooling2D(pool_size=(2,2), strides=2),
             keras.layers.Flatten(),
             keras.layers.Dense(128, activation='relu'),
@@ -109,9 +113,7 @@ def reconfig_model(index,zero_layer_weight,third_layer_weight,seventh_layer_weig
               metrics=['accuracy'])
     return model, prob, prob_lst
     
------------------------------------------------------------------------------------------------------------------
-
-###########################Data pre-processing################################
+ ####################################### Data pre-processing######################################
 
 fashion_mnist = keras.datasets.fashion_mnist
 (train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
@@ -127,23 +129,7 @@ train_images = train_images.reshape((train_images.shape[0], 28, 28, 1))
 test_images = test_images.reshape((test_images.shape[0], 28, 28, 1))
 
 
------------------------------------------------------------------------------------------------------------------
-###############################Class to track loss history per epoch##########################
-
-class LossHistory(keras.callbacks.Callback):
-     def on_epoch_end(self, epoch, logs=None):
-        avg_loss_lst.append(logs["loss"])
------------------------------------------------------------------------------------------------------------------
-
-#############################Main code####################################
-
-#Main code
-
-hyp_epoch = 1
-
-loss_hist_lst = []
-
-avg_loss_lst = []
+################################## Main code #########################################
 
 class LossHistory(keras.callbacks.Callback):
      def on_epoch_end(self, epoch, logs=None):
@@ -154,11 +140,11 @@ model = keras.Sequential([
                 keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1),
                                     input_shape=(28,28,1),
                                     padding='same',activation='relu'),
-                keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+                keras.layers.Dropout(rate=(1-bijection(prob))), #Dropout layer
                 keras.layers.MaxPooling2D((2,2), strides=2),
                 keras.layers.Conv2D(filters=64, kernel_size=(3,3), strides=(1,1), padding='same',
                                     activation='relu'),
-                keras.layers.Dropout(rate=(1-prob)), #Dropout layer
+                keras.layers.Dropout(rate=(1-bijection(prob))), #Dropout layer
                 keras.layers.MaxPooling2D((2,2), strides=2),
                 keras.layers.Flatten(),
                 keras.layers.Dense(128, activation='relu'),
@@ -174,7 +160,7 @@ for i in range(1,11):
 
     #Model fitting
     if i == 1:  #For first iteration
-        print(1-prob)
+        print(1-bijection(prob))
         hist_first_iteration = model.fit(train_images, train_labels, epochs= 2, 
                                          callbacks=LossHistory())
         
@@ -185,7 +171,7 @@ for i in range(1,11):
 
     else: #For remaining iteration
         #print(model.get_config())
-        print(1-prob)
+        print(1-bijection(prob))
         hist_remaining_iteration = model.fit(train_images, train_labels, epochs= hyp_epoch, 
                                              callbacks=LossHistory())
         
@@ -221,6 +207,14 @@ for i in range(1,11):
 
 print('\nTest accuracy:', test_acc)
 
+############################# Model evaluation ############################################33
+
+test_loss, test_acc = model.evaluate(test_images,  test_labels, verbose=2)
+
+
+
+
+    
 
 
 
